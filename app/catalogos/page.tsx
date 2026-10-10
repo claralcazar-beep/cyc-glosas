@@ -214,17 +214,44 @@ function TabUsuarios() {
   const sb = supabaseBrowser();
   const [filas, setFilas] = useState<UsuarioFila[] | null>(null);
   const [ips, setIps] = useState<Ips[]>([]);
+  const [nuevo, setNuevo] = useState({ email: '', nombre: '', password: '', ips_id: '', rol: 'auditor' });
   const [asig, setAsig] = useState<{ user_id: string; ips_id: string; rol: string }>({ user_id: '', ips_id: '', rol: 'auditor' });
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ tipo: 'info' | 'error' | 'ok'; texto: string } | null>(null);
+  const [ocupado, setOcupado] = useState(false);
   const cargar = useCallback(async () => {
     const [{ data: u }, { data: i }] = await Promise.all([sb.from('usuarios').select('user_id, email, nombre, es_admin_cyc, usuarios_ips(ips_id, rol)').order('email'), sb.from('ips').select('*').order('nombre')]);
     setFilas((u ?? []) as unknown as UsuarioFila[]); setIps((i ?? []) as Ips[]);
   }, [sb]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  async function llamar(metodo: 'POST' | 'PATCH' | 'DELETE', cuerpo: unknown, exito: string) {
+    setOcupado(true); setMsg(null);
+    const r = await fetch('/api/usuarios', { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+    const j = await r.json();
+    setOcupado(false);
+    if (!r.ok) return setMsg({ tipo: 'error', texto: j.error ?? 'Error' });
+    setMsg({ tipo: 'ok', texto: exito });
+    cargar();
+    return true;
+  }
+  async function crear() {
+    if (!nuevo.email || !nuevo.password) return setMsg({ tipo: 'error', texto: 'Correo y contraseña son obligatorios.' });
+    const ok = await llamar('POST', nuevo, `Usuario ${nuevo.email} creado. Entrégale el correo y la contraseña por un canal seguro.`);
+    if (ok) setNuevo({ email: '', nombre: '', password: '', ips_id: '', rol: 'auditor' });
+  }
+  async function cambiarClave(u: UsuarioFila) {
+    const password = prompt(`Nueva contraseña para ${u.email} (mínimo 8 caracteres):`);
+    if (!password) return;
+    await llamar('PATCH', { user_id: u.user_id, password }, 'Contraseña actualizada.');
+  }
+  async function eliminar(u: UsuarioFila) {
+    if (!confirm(`¿Eliminar el usuario ${u.email}? Sus respuestas y bitácora se conservan.`)) return;
+    await llamar('DELETE', { user_id: u.user_id }, 'Usuario eliminado.');
+  }
   async function asignar() {
-    if (!asig.user_id || !asig.ips_id) return setMsg('Seleccione usuario e IPS.');
+    if (!asig.user_id || !asig.ips_id) return setMsg({ tipo: 'error', texto: 'Seleccione usuario e IPS.' });
     const { error } = await sb.from('usuarios_ips').upsert(asig);
-    setMsg(error ? `Error: ${error.message} (solo el administrador de CyC asigna IPS)` : 'Asignado.');
+    setMsg(error ? { tipo: 'error', texto: `Error: ${error.message} (solo el administrador de CyC asigna IPS)` } : { tipo: 'ok', texto: 'Asignado.' });
     cargar();
   }
   async function quitar(user_id: string, ips_id: string) {
@@ -232,27 +259,40 @@ function TabUsuarios() {
   }
   async function alternarAdmin(u: UsuarioFila) {
     const { error } = await sb.from('usuarios').update({ es_admin_cyc: !u.es_admin_cyc }).eq('user_id', u.user_id);
-    setMsg(error ? `Error: ${error.message}` : 'Actualizado.'); cargar();
+    setMsg(error ? { tipo: 'error', texto: `Error: ${error.message}` } : { tipo: 'ok', texto: 'Actualizado.' }); cargar();
   }
   if (!filas) return <Cargando />;
   const nombreIps = (id: string) => ips.find((i) => i.id === id)?.nombre ?? id;
   return (
     <div className="space-y-4">
-      <Alerta tipo="info">Los usuarios se crean en Supabase → Authentication → Users (registro público deshabilitado). Aquí se les asigna IPS y rol. El administrador de CyC ve todas las IPS.</Alerta>
+      {msg && <Alerta tipo={msg.tipo}>{msg.texto}</Alerta>}
+      <div className="tarjeta space-y-3">
+        <div className="subtitulo">Nuevo usuario</div>
+        <div className="grid gap-3 md:grid-cols-5">
+          <div><label className="etiqueta">Correo</label><input type="email" className="campo" value={nuevo.email} onChange={(e) => setNuevo({ ...nuevo, email: e.target.value })} /></div>
+          <div><label className="etiqueta">Nombre</label><input className="campo" value={nuevo.nombre} onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })} /></div>
+          <div><label className="etiqueta">Contraseña inicial (mín. 8)</label><input type="text" className="campo" value={nuevo.password} onChange={(e) => setNuevo({ ...nuevo, password: e.target.value })} /></div>
+          <div><label className="etiqueta">IPS</label><select className="campo" value={nuevo.ips_id} onChange={(e) => setNuevo({ ...nuevo, ips_id: e.target.value })}><option value="">Sin asignar</option>{ips.map((i) => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
+          <div><label className="etiqueta">Rol</label><select className="campo" value={nuevo.rol} onChange={(e) => setNuevo({ ...nuevo, rol: e.target.value })}><option value="admin">admin</option><option value="auditor">auditor</option><option value="lectura">lectura</option></select></div>
+        </div>
+        <button className="boton" onClick={crear} disabled={ocupado}><Plus className="h-4 w-4" /> {ocupado ? 'Creando…' : 'Crear usuario'}</button>
+        <p className="text-xs text-slate-500">El usuario queda confirmado y puede entrar de inmediato. Roles: <b>admin</b> edita catálogos de su IPS, <b>auditor</b> responde glosas, <b>lectura</b> solo consulta. El administrador de CyC ve todas las IPS.</p>
+      </div>
       <div className="tarjeta flex flex-wrap items-end gap-2">
+        <div className="subtitulo w-full">Asignar IPS adicional a un usuario existente</div>
         <div><label className="etiqueta">Usuario</label><select className="campo" value={asig.user_id} onChange={(e) => setAsig({ ...asig, user_id: e.target.value })}><option value="">—</option>{filas.map((u) => <option key={u.user_id} value={u.user_id}>{u.email}</option>)}</select></div>
         <div><label className="etiqueta">IPS</label><select className="campo" value={asig.ips_id} onChange={(e) => setAsig({ ...asig, ips_id: e.target.value })}><option value="">—</option>{ips.map((i) => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
         <div><label className="etiqueta">Rol</label><select className="campo" value={asig.rol} onChange={(e) => setAsig({ ...asig, rol: e.target.value })}><option value="admin">admin</option><option value="auditor">auditor</option><option value="lectura">lectura</option></select></div>
-        <button className="boton" onClick={asignar}><Plus className="h-4 w-4" /> Asignar</button>
-        {msg && <span className="text-sm text-slate-600">{msg}</span>}
+        <button className="boton-sec" onClick={asignar}><Plus className="h-4 w-4" /> Asignar</button>
       </div>
       <div className="tarjeta overflow-x-auto">
-        <table className="tabla"><thead><tr><th>Correo</th><th>Nombre</th><th>Admin CyC</th><th>IPS asignadas</th></tr></thead>
+        <table className="tabla"><thead><tr><th>Correo</th><th>Nombre</th><th>Admin CyC</th><th>IPS asignadas</th><th></th></tr></thead>
           <tbody>{filas.map((u) => (
             <tr key={u.user_id}>
               <td>{u.email}</td><td>{u.nombre}</td>
               <td><button className={`insignia ${u.es_admin_cyc ? 'bg-marca-100 text-marca-700' : 'bg-slate-100 text-slate-600'}`} onClick={() => alternarAdmin(u)}>{u.es_admin_cyc ? 'Sí (cambiar)' : 'No (cambiar)'}</button></td>
               <td className="space-x-1">{u.usuarios_ips.map((a) => <span key={a.ips_id} className="insignia bg-slate-100 text-slate-700">{nombreIps(a.ips_id)} · {a.rol} <button className="ml-1 text-red-600" onClick={() => quitar(u.user_id, a.ips_id)}>×</button></span>)}</td>
+              <td className="whitespace-nowrap text-xs"><button className="mr-2 text-marca-600 hover:underline" onClick={() => cambiarClave(u)}>Contraseña</button><button className="text-red-600 hover:underline" onClick={() => eliminar(u)}>Eliminar</button></td>
             </tr>
           ))}</tbody></table>
       </div>
