@@ -1,56 +1,57 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ShieldCheck } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { ClipboardList, FileStack, LayoutDashboard, LogOut, Settings2, ShieldCheck } from 'lucide-react';
 import { supabaseBrowser } from '@/lib/supabase/client';
 
-export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [clave, setClave] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [cargando, setCargando] = useState(false);
+const enlaces = [
+  { href: '/', texto: 'Tablero', Icono: LayoutDashboard },
+  { href: '/actas', texto: 'Actas', Icono: FileStack },
+  { href: '/glosas', texto: 'Glosas', Icono: ClipboardList },
+  { href: '/catalogos', texto: 'Catálogos', Icono: Settings2 },
+];
 
-  async function entrar(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setCargando(true);
+export default function Nav() {
+  const ruta = usePathname();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
     const sb = supabaseBrowser();
-    const { error } = await sb.auth.signInWithPassword({ email, password: clave });
-    setCargando(false);
-    if (error) {
-      setError('Correo o contraseña incorrectos.');
-      return;
-    }
-    router.replace('/');
-    router.refresh();
-  }
+    sb.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+  }, [ruta]);
+
+  if (ruta.startsWith('/login')) return null;
+  if (ruta.includes('/respuesta')) return null; // vista imprimible sin barra
 
   return (
-    <div className="mx-auto mt-16 max-w-sm">
-      <div className="tarjeta">
-        <div className="mb-6 flex items-center gap-2 text-marca-700">
-          <ShieldCheck className="h-7 w-7" />
-          <div>
-            <div className="text-lg font-semibold">CyC Glosas</div>
-            <div className="text-xs text-slate-500">Auditoría de cuentas médicas</div>
-          </div>
-        </div>
-        <form onSubmit={entrar} className="space-y-4">
-          <div>
-            <label className="etiqueta">Correo</label>
-            <input className="campo" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
-          </div>
-          <div>
-            <label className="etiqueta">Contraseña</label>
-            <input className="campo" type="password" value={clave} onChange={(e) => setClave(e.target.value)} required autoComplete="current-password" />
-          </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button className="boton w-full justify-center" disabled={cargando}>{cargando ? 'Entrando…' : 'Entrar'}</button>
-        </form>
-        <p className="mt-4 text-xs text-slate-400">El registro está deshabilitado. Los usuarios los crea el administrador de CyC Salud en Supabase.</p>
+    <header className="no-imprimir border-b border-slate-200 bg-white">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+        <Link href="/" className="flex items-center gap-2 font-semibold text-marca-700">
+          <ShieldCheck className="h-6 w-6" />
+          <span>CyC Glosas</span>
+          <span className="hidden text-xs font-normal text-slate-400 sm:inline">· auditoría de cuentas médicas</span>
+        </Link>
+        <nav className="flex items-center gap-1">
+          {enlaces.map(({ href, texto, Icono }) => {
+            const activo = href === '/' ? ruta === '/' : ruta.startsWith(href);
+            return (
+              <Link key={href} href={href}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${activo ? 'bg-marca-50 text-marca-700' : 'text-slate-600 hover:bg-slate-100'}`}>
+                <Icono className="h-4 w-4" />
+                <span className="hidden sm:inline">{texto}</span>
+              </Link>
+            );
+          })}
+          <form action="/auth/salir" method="post" className="ml-2 flex items-center gap-2 border-l border-slate-200 pl-3">
+            <span className="hidden text-xs text-slate-500 md:inline">{email}</span>
+            <button type="submit" title="Cerrar sesión" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
+              <LogOut className="h-4 w-4" />
+            </button>
+          </form>
+        </nav>
       </div>
-    </div>
+    </header>
   );
 }
